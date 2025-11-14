@@ -340,6 +340,107 @@ function Chatbot({ currentPage = 'busDashboard' }) {
     }
   }
 
+  const formatInlineText = (text) => {
+    const segments = text.split(/(\*\*[^*]+\*\*)/g)
+    return segments.map((segment, index) => {
+      if (!segment) return null
+      const isBold = segment.startsWith('**') && segment.endsWith('**') && segment.length > 4
+      if (isBold) {
+        return (
+          <strong key={`bold-${index}`}>
+            {segment.slice(2, -2)}
+          </strong>
+        )
+      }
+      return (
+        <React.Fragment key={`text-${index}`}>
+          {segment}
+        </React.Fragment>
+      )
+    })
+  }
+
+  const renderMessageBody = (content) => {
+    if (content === null || content === undefined) return null
+
+    const textContent = typeof content === 'string'
+      ? content
+      : typeof content === 'object'
+        ? JSON.stringify(content, null, 2)
+        : String(content)
+
+    const lines = textContent.split('\n')
+    const blocks = []
+    let listBuffer = null
+    let blockCounter = 0
+
+    const flushList = () => {
+      if (listBuffer && listBuffer.items.length) {
+        const ListTag = listBuffer.type === 'ol' ? 'ol' : 'ul'
+        const listIndex = blockCounter++
+        blocks.push(
+          <ListTag key={`list-${listIndex}`} className="formatted-list">
+            {listBuffer.items.map((item, idx) => (
+              <li key={`list-${listIndex}-item-${idx}`}>
+                {formatInlineText(item)}
+              </li>
+            ))}
+          </ListTag>
+        )
+      }
+      listBuffer = null
+    }
+
+    const startList = (type) => {
+      if (!listBuffer || listBuffer.type !== type) {
+        flushList()
+        listBuffer = { type, items: [] }
+      }
+    }
+
+    lines.forEach((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) {
+        flushList()
+        return
+      }
+
+      const bulletMatch = trimmed.match(/^[-*]\s+(.*)/)
+      if (bulletMatch) {
+        startList('ul')
+        listBuffer.items.push(bulletMatch[1])
+        return
+      }
+
+      const orderedMatch = trimmed.match(/^\d+\.\s+(.*)/)
+      if (orderedMatch) {
+        startList('ol')
+        listBuffer.items.push(orderedMatch[1])
+        return
+      }
+
+      flushList()
+      const paragraphIndex = blockCounter++
+      blocks.push(
+        <p key={`para-${paragraphIndex}`}>
+          {formatInlineText(trimmed)}
+        </p>
+      )
+    })
+
+    flushList()
+
+    if (!blocks.length) {
+      return <span>{textContent}</span>
+    }
+
+    return (
+      <div className="formatted-message">
+        {blocks}
+      </div>
+    )
+  }
+
   return (
     <>
       {/* Floating Chat Button */}
@@ -392,7 +493,7 @@ function Chatbot({ currentPage = 'busDashboard' }) {
                       />
                     </div>
                   )}
-                  {message.content}
+                  {renderMessageBody(message.content)}
                 </div>
                 {message.role === 'assistant' && (
                   <button

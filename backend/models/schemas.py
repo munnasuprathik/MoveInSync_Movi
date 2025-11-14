@@ -270,19 +270,3 @@ class DeploymentResponse(DeploymentBase):
     deleted_by: Optional[int] = None
 
 
-# Chatbot schemas
-class ChatMessage(BaseSchema):
-    role: str  # 'user' or 'assistant'
-    content: str
-
-
-class ChatRequest(BaseSchema):
-    messages: List[ChatMessage]
-    temperature: Optional[float] = 0.7
-    max_tokens: Optional[int] = 500
-
-
-class ChatResponse(BaseSchema):
-    message: str
-    role: str = "assistant"
-

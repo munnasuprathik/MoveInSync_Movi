@@ -1,6 +1,6 @@
 # Movi - Multimodal Transport Agent
 
-A production-ready transport management system with AI assistant capabilities, built with Supabase database, FastAPI backend, and comprehensive audit trails.
+A production-ready transport management system built with Supabase database, FastAPI backend, MCP-powered AI assistant, and comprehensive audit trails.
 
 ## Project Structure
 
@@ -33,19 +33,28 @@ pip install -r requirements.txt
 ```
 
 ### 2. Set Up Environment Variables
-1. Create `.env` file in project root with:
-   ```
-   SUPABASE_URL=your_supabase_url
-   SUPABASE_KEY=your_supabase_anon_key
-   OPENAI_API_KEY=your_openai_api_key
-   # Optional overrides:
-   # OPENAI_TEXT_MODEL=gpt-4o-mini
-   # OPENAI_VISION_MODEL=gpt-4o-mini
-   ```
-   - Get your Supabase credentials from: https://supabase.com/dashboard
-   - Get your OpenAI API key from: https://platform.openai.com/api-keys
-2. Run `database/schema.sql` in Supabase SQL Editor
-3. (Optional) Run `python database/init_database.py` for sample data
+Create `.env` in the project root with:
+
+```
+# CRUD API / repository layer
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_anon_key
+
+# MCP-powered AI assistant
+SUPABASE_PROJECT_REF=your_supabase_project_ref
+SUPABASE_ACCESS_TOKEN=your_supabase_service_role_token
+ANTHROPIC_API_KEY=your_anthropic_api_key
+```
+
+Notes:
+- Get Supabase URL/key/project ref from https://supabase.com/dashboard (Project Settings → API)
+- Generate a service role access token from Supabase Dashboard → Settings → API
+- Create an Anthropic API key at https://console.anthropic.com/
+- Keep these secrets safe and never commit `.env`
+
+After configuring the environment variables:
+1. Run `database/schema.sql` in the Supabase SQL Editor
+2. (Optional) Seed sample data with `python database/init_database.py`
 
 ### 3. Start Backend Server
 ```bash
@@ -77,10 +86,11 @@ Frontend will be available at:
 - Audit trails
 
 ### Backend API (`backend/`)
-- FastAPI REST API
+- FastAPI REST API (mounted under `/api`)
 - Full CRUD operations
 - Type-safe models
 - Auto-generated docs
+- MCP/LangGraph chatbot backend exposed via `/agent`, `/api/chat`, `/api/upload-image`
 - Auto-persist to database
 
 ### Frontend (`frontend/`)
@@ -88,11 +98,7 @@ Frontend will be available at:
 - Two main pages: Bus Dashboard & Manage Route
 - API integration with Axios
 - Modern responsive UI
-- AI Chatbot with LangGraph Agent integration
-  - Text-to-speech (Web Speech API)
-  - Speech-to-text (Web Speech API)
-  - Image upload and processing (OpenAI GPT-4o Vision)
-  - Context-aware responses based on current page
+- Chatbot UI component wired to the MCP backend endpoints
 
 ## Documentation
 

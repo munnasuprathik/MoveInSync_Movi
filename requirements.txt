@@ -8,6 +8,7 @@ httpx
 websockets
 langgraph>=1.0.0
 langchain-core>=1.0.4
-langchain-openai>=0.2.0
-openai>=1.51.0
-
+langchain-anthropic>=0.1.14
+langchain-mcp-adapters>=0.0.10
+mcp>=0.4.2
+anthropic>=0.34.0
