@@ -1,10 +1,7 @@
 import axios from 'axios'
 
-const fallbackOrigin = import.meta.env.DEV
-  ? 'http://localhost:5005'
-  : 'https://moveinsync-movi.onrender.com'
-
-const rawApiOrigin = import.meta.env.VITE_API_BASE_URL || fallbackOrigin
+const rawApiOrigin =
+  import.meta.env.VITE_API_BASE_URL || 'https://moveinsync-movi.onrender.com'
 const API_BASE_URL = `${rawApiOrigin.replace(/\/$/, '')}/api`
 
 const api = axios.create({
