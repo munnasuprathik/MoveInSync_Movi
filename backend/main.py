@@ -82,7 +82,7 @@ async def chat(request: ChatRequest):
     Handle text chat messages through LangGraph agent.
     
     This endpoint processes user messages using the Movi AI agent which:
-    - Understands user intent using Gemini with function calling
+    - Understands user intent using OpenAI GPT-4o function calling
     - Executes database operations through tools
     - Checks for consequences before dangerous actions
     - Requests confirmation when needed
@@ -175,7 +175,7 @@ async def upload_image(
     Handle image uploads with text instructions.
     
     This endpoint processes dashboard screenshots to extract trip information.
-    The agent uses Gemini Vision to identify highlighted/circled trips in images.
+    The agent uses OpenAI Vision models (GPT-4o family) to identify highlighted/circled trips in images.
     
     Args:
         file: Image file (screenshot of dashboard)

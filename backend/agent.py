@@ -2,31 +2,49 @@
 LangGraph implementation for Movi transport management AI agent.
 
 This module implements a complete agent workflow with:
-- Intent classification using Gemini with function calling
+- Intent classification using OpenAI GPT-4o function calling
 - Image processing for dashboard screenshots
 - Consequence checking (Tribal Knowledge)
 - User confirmation flow
 - Tool execution
 """
+from __future__ import annotations
 
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Annotated, List, Optional, Dict, Any
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.tools import tool
+import ast
 import base64
+import json
 import logging
 import operator
 import os
+import re
+from pathlib import Path
 from dotenv import load_dotenv
-from database.repositories import PathsRepository, TripsRepository, StopsRepository
+from database.repositories import PathsRepository, TripsRepository, StopsRepository, RoutesRepository
 
 # Load environment variables
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env")
 
 # Logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")
+OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", OPENAI_TEXT_MODEL)
+MAX_TOOL_ITEMS_FOR_LLM = 25
+
+
+def build_openai_llm(model_name: Optional[str] = None) -> ChatOpenAI:
+    """Create an OpenAI chat model instance with shared defaults."""
+    if not os.getenv("OPENAI_API_KEY"):
+        raise ValueError("OPENAI_API_KEY not found in environment variables")
+    return ChatOpenAI(model=model_name or OPENAI_TEXT_MODEL, temperature=0)
+
 
 # Multi-turn form configuration for create/update flows
 FORM_CONFIG = {
@@ -103,6 +121,196 @@ def format_data_preview(data: Any, limit: int = 3) -> str:
         first_fields = list(data.items())[:8]
         return "\n".join(f"- {k}: {v}" for k, v in first_fields)
     return str(data)
+
+
+def parse_literal(value: str) -> Any:
+    try:
+        return ast.literal_eval(value)
+    except Exception:
+        return value
+
+
+def try_parse_tool_command(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Detect inline tool invocations like:
+    ```tool_get_all_vehicles()```
+    ```tool_filter_vehicles_by_type
+    vehicle_type: bus
+    ```
+    """
+    if not text:
+        return None
+
+    cleaned = text.strip().strip("`").strip()
+    if not cleaned.startswith("tool_"):
+        cleaned = cleaned.replace("`", "").strip()
+        if not cleaned.startswith("tool_"):
+            # Try regex fallback for inline function-style call
+            match = re.search(r"(tool_[a-zA-Z0-9_]+)\s*\((.*?)\)", cleaned, re.DOTALL)
+            if not match:
+                return None
+            tool_name = match.group(1).replace("tool_", "")
+            args_str = match.group(2).strip()
+            return {
+                "tool_name": tool_name,
+                "args": _parse_args_from_parentheses(args_str)
+            }
+
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    first_line = lines[0]
+    # Handle function-style single line e.g. tool_xxx(...)
+    if "(" in first_line and ")" in first_line:
+        match = re.search(r"(tool_[a-zA-Z0-9_]+)\s*\((.*?)\)", first_line)
+        if not match:
+            return None
+        tool_name = match.group(1).replace("tool_", "")
+        args_str = match.group(2).strip()
+        return {
+            "tool_name": tool_name,
+            "args": _parse_args_from_parentheses(args_str)
+        }
+
+    # Otherwise treat as block where following lines are key:value pairs
+    tool_name = first_line.replace("tool_", "")
+    args = _parse_args_from_block(lines[1:])
+    return {"tool_name": tool_name, "args": args}
+
+
+def _parse_args_from_parentheses(args_str: str) -> Dict[str, Any]:
+    args: Dict[str, Any] = {}
+    if not args_str:
+        return args
+    if "=" in args_str:
+        parts = [p.strip() for p in args_str.split(",") if p.strip()]
+        for part in parts:
+            if "=" in part:
+                key, value = part.split("=", 1)
+                args[key.strip()] = parse_literal(value.strip())
+    else:
+        parsed = parse_literal(args_str)
+        if isinstance(parsed, dict):
+            args = parsed
+        elif parsed is not None:
+            args["value"] = parsed
+    return args
+
+
+def _parse_args_from_block(lines: List[str]) -> Dict[str, Any]:
+    args: Dict[str, Any] = {}
+    buffer_key: Optional[str] = None
+    buffer_value_lines: List[str] = []
+
+    def flush_buffer():
+        nonlocal buffer_key, buffer_value_lines, args
+        if buffer_key is None:
+            return
+        value_str = "\n".join(buffer_value_lines).strip()
+        args[buffer_key] = parse_literal(value_str) if value_str else None
+        buffer_key = None
+        buffer_value_lines = []
+
+    for line in lines:
+        if ":" in line and line.split(":", 1)[0].strip():
+            flush_buffer()
+            key, value = line.split(":", 1)
+            buffer_key = key.strip()
+            buffer_value_lines = [value.strip()]
+        else:
+            buffer_value_lines.append(line.strip())
+
+    flush_buffer()
+    return args
+
+
+def get_last_user_message(state: AgentState) -> str:
+    """Return the most recent user utterance."""
+    for msg in reversed(state.get("messages", [])):
+        if msg.get("role") == "user" and msg.get("content"):
+            return msg["content"]
+    return ""
+
+
+def dict_to_message(message: Dict[str, str]) -> Optional[HumanMessage]:
+    """Convert stored conversation dicts into LangChain message objects."""
+    role = message.get("role")
+    content = message.get("content", "")
+    if not content:
+        return None
+    if role == "system":
+        return SystemMessage(content=content)
+    if role == "assistant":
+        return AIMessage(content=content)
+    return HumanMessage(content=content)
+
+
+def serialize_tool_result(result: Dict[str, Any]) -> str:
+    """Safely serialize tool results for prompting."""
+    try:
+        return json.dumps(result, default=str)
+    except Exception:
+        return str(result)
+
+
+def prepare_followup_payload(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Trim large tool responses before sending them back to the LLM to avoid token explosions.
+    """
+    payload = dict(result)
+    data = payload.get("data")
+
+    if isinstance(data, list):
+        total = len(data)
+        if total > MAX_TOOL_ITEMS_FOR_LLM:
+            logger.warning(
+                "followup payload truncated: %s items -> %s",
+                total,
+                MAX_TOOL_ITEMS_FOR_LLM,
+            )
+            payload["data"] = data[:MAX_TOOL_ITEMS_FOR_LLM]
+            payload["summary"] = {
+                "total_items": total,
+                "shown_items": MAX_TOOL_ITEMS_FOR_LLM,
+                "note": f"Showing first {MAX_TOOL_ITEMS_FOR_LLM} results. Ask for filters to view more.",
+            }
+        else:
+            payload["summary"] = {"total_items": total}
+    elif isinstance(data, dict):
+        keys = list(data.keys())[:10]
+        payload["summary"] = {"fields_preview": keys}
+    else:
+        payload["summary"] = {"data_type": type(data).__name__}
+
+    return payload
+
+
+def generate_llm_followup(state: AgentState, tool_name: str, result: Dict[str, Any]) -> str:
+    """
+    Run a lightweight OpenAI pass so the LLM formats the tool output before
+    responding to the user.
+    """
+    trimmed_result = prepare_followup_payload(result)
+    llm = build_openai_llm()
+
+    user_context = get_last_user_message(state) or "the user's latest request"
+    serialized = serialize_tool_result(trimmed_result)
+    prompt = (
+        "You are Movi, an operations assistant for a transport company.\n"
+        "The following JSON came from a trusted tool call. Extract the key facts "
+        "and answer the user's request directly. Prefer bullet lists for multiple "
+        "items and mention totals. If an error is present, apologize and explain it. "
+        "Avoid referencing internal tool names.\n\n"
+        f"User request: {user_context}\n"
+        f"Tool output:\n{serialized}"
+    )
+
+    response = llm.invoke([
+        SystemMessage(content="Always provide clear, data-backed answers using the supplied tool output."),
+        HumanMessage(content=prompt)
+    ])
+    return response.content if hasattr(response, "content") else str(response)
 
 # Import all tool functions
 from backend.tools import (
@@ -755,7 +963,7 @@ def agent_entry_node(state: AgentState) -> AgentState:
 
 def process_image_node(state: AgentState) -> AgentState:
     """
-    Extract trip information from uploaded dashboard screenshots using Gemini Vision.
+    Extract trip information from uploaded dashboard screenshots using OpenAI vision models.
     Only runs if image_data exists in state.
     """
     try:
@@ -768,15 +976,8 @@ def process_image_node(state: AgentState) -> AgentState:
         if not image_data:
             return state
         
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY not found in environment variables")
-        
         # Prepare LLM for vision prompt
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-exp",
-            temperature=0,
-        )
+        llm = build_openai_llm(OPENAI_VISION_MODEL)
         
         mime_type = state.get("image_mime_type") or "image/png"
         data_url = f"data:{mime_type};base64,{image_data}"
@@ -842,20 +1043,13 @@ def process_image_node(state: AgentState) -> AgentState:
 
 def classify_intent_node(state: AgentState) -> AgentState:
     """
-    Use Gemini with function calling to understand user intent and determine which tool to call.
+    Use OpenAI with function calling to understand user intent and determine which tool to call.
     """
     try:
         logger.info("classify_intent_node: current_page=%s messages=%d",
                     state.get("current_page"), len(state.get("messages", [])))
-        # Initialize Gemini LLM
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY not found in environment variables")
-        
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-exp",
-            temperature=0
-        )
+        # Initialize OpenAI LLM
+        llm = build_openai_llm()
         
         # Bind tools to LLM
         llm_with_tools = llm.bind_tools(TOOLS)
@@ -866,14 +1060,13 @@ def classify_intent_node(state: AgentState) -> AgentState:
         # System message
         current_page = state.get("current_page", "busDashboard")
         system_message = f"You are Movi, a transport management assistant. Current page: {current_page}. Help users manage their transport operations. Use the available tools to perform actions."
-        messages.append({"role": "system", "content": system_message})
+        messages.append(SystemMessage(content=system_message))
         
-        # Add conversation history
+        # Add conversation history as LangChain messages
         for msg in state.get("messages", []):
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if content:  # Only add non-empty messages
-                messages.append({"role": role, "content": content})
+            lc_msg = dict_to_message(msg)
+            if lc_msg:
+                messages.append(lc_msg)
         
         # Invoke LLM
         response = llm_with_tools.invoke(messages)
@@ -911,11 +1104,21 @@ def classify_intent_node(state: AgentState) -> AgentState:
         else:
             # No tool calls - add response text as assistant message
             response_content = response.content if hasattr(response, "content") else str(response)
-            state["messages"].append({
-                "role": "assistant",
-                "content": response_content
-            })
-            logger.info("classify_intent_node: no tool call, responded directly")
+            parsed_tool = try_parse_tool_command(response_content)
+            if parsed_tool:
+                logger.info("classify_intent_node: parsed inline tool %s args=%s",
+                            parsed_tool["tool_name"], parsed_tool["args"])
+                state["pending_action"] = parsed_tool
+                state["messages"].append({
+                    "role": "assistant",
+                    "content": "Sure, pulling that information now."
+                })
+            else:
+                state["messages"].append({
+                    "role": "assistant",
+                    "content": response_content
+                })
+                logger.info("classify_intent_node: no tool call, responded directly")
         
         return state
         
@@ -1224,24 +1427,23 @@ def execute_action_node(state: AgentState) -> AgentState:
         
         # Execute tool function
         result = tool_func(**args)
-        
-        # Build response message
-        if result.get("success"):
-            data_preview = result.get("data")
-            formatted = format_data_preview(data_preview)
-            logger.info("execute_action_node: tool %s succeeded", tool_name_clean)
-            message = f"✅ {result.get('message', 'Action completed successfully')}"
-            if formatted:
-                message += f"\nHere are the highlights:\n{formatted}"
-        else:
-            error_msg = result.get("error", "Unknown error")
-            logger.error("execute_action_node: tool %s failed | error=%s", tool_name_clean, error_msg)
-            message = f"❌ Error: {error_msg}"
+        logger.info("execute_action_node: tool %s success=%s", tool_name_clean, result.get("success"))
+
+        # Route tool output back through OpenAI for the final reply
+        try:
+            assistant_reply = generate_llm_followup(state, tool_name_clean, result)
+        except Exception as followup_error:
+            logger.exception("execute_action_node: follow-up generation failed | error=%s",
+                             str(followup_error))
+            if result.get("success"):
+                assistant_reply = result.get("message", "Action completed successfully")
+            else:
+                assistant_reply = f"❌ Error: {result.get('error', 'Unknown error')}"
         
         # Append to messages
         state["messages"].append({
             "role": "assistant",
-            "content": message
+            "content": assistant_reply
         })
         
         # Reset state

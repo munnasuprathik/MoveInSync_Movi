@@ -37,10 +37,13 @@ pip install -r requirements.txt
    ```
    SUPABASE_URL=your_supabase_url
    SUPABASE_KEY=your_supabase_anon_key
-   GOOGLE_API_KEY=your_google_api_key
+   OPENAI_API_KEY=your_openai_api_key
+   # Optional overrides:
+   # OPENAI_TEXT_MODEL=gpt-4o-mini
+   # OPENAI_VISION_MODEL=gpt-4o-mini
    ```
    - Get your Supabase credentials from: https://supabase.com/dashboard
-   - Get your Google API key from: https://makersuite.google.com/app/apikey (for Gemini Vision)
+   - Get your OpenAI API key from: https://platform.openai.com/api-keys
 2. Run `database/schema.sql` in Supabase SQL Editor
 3. (Optional) Run `python database/init_database.py` for sample data
 
@@ -88,7 +91,7 @@ Frontend will be available at:
 - AI Chatbot with LangGraph Agent integration
   - Text-to-speech (Web Speech API)
   - Speech-to-text (Web Speech API)
-  - Image upload and processing (Gemini Vision)
+  - Image upload and processing (OpenAI GPT-4o Vision)
   - Context-aware responses based on current page
 
 ## Documentation

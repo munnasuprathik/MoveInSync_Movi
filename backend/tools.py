@@ -20,11 +20,12 @@ MAX_RESULTS = 50
 
 def _limit_results(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Limit large result sets to MAX_RESULTS and return metadata.
+    Return result metadata. If the dataset is large, keep all rows but flag it
+    so the caller can mention the volume and suggest filters.
     """
     if len(records) > MAX_RESULTS:
         return {
-            "data": records[:MAX_RESULTS],
+            "data": records,
             "limited": True,
             "total": len(records)
         }
@@ -45,14 +46,14 @@ def _error(message: str, error: str = "") -> Dict[str, Any]:
 # ================================================================
 
 def get_all_vehicles() -> Dict[str, Any]:
-    """Get all active vehicles (limited to 50 results)."""
+    """Get all active vehicles."""
     try:
         repo = VehiclesRepository()
         vehicles = repo.get_all_active()
         limited = _limit_results(vehicles)
         message = f"Found {limited['total']} active vehicles."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to fetch vehicles", str(e))
@@ -149,7 +150,7 @@ def filter_vehicles_by_type(vehicle_type: str) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} vehicles of type '{vehicle_type}'."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter vehicles", str(e))
@@ -165,7 +166,7 @@ def filter_vehicles_by_availability(is_available: bool) -> Dict[str, Any]:
         status = "available" if is_available else "unavailable"
         message = f"Found {limited['total']} {status} vehicles."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter vehicles", str(e))
@@ -178,14 +179,14 @@ def filter_vehicles_by_availability(is_available: bool) -> Dict[str, Any]:
 # ================================================================
 
 def get_all_deployments() -> Dict[str, Any]:
-    """Get all active deployments (limited to 50 results)."""
+    """Get all active deployments."""
     try:
         repo = DeploymentsRepository()
         deployments = repo.get_all_active()
         limited = _limit_results(deployments)
         message = f"Found {limited['total']} active deployments."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to fetch deployments", str(e))
@@ -246,7 +247,7 @@ def filter_deployments_by_trip(trip_id: int) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} deployments for trip {trip_id}."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter deployments", str(e))
@@ -261,7 +262,7 @@ def filter_deployments_by_vehicle(vehicle_id: int) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} deployments for vehicle {vehicle_id}."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter deployments", str(e))
@@ -276,7 +277,7 @@ def filter_deployments_by_driver(driver_id: int) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} deployments for driver {driver_id}."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter deployments", str(e))
@@ -328,14 +329,14 @@ def get_unassigned_vehicles() -> Dict[str, Any]:
 # ================================================================
 
 def get_all_drivers() -> Dict[str, Any]:
-    """Get all active drivers (limited to 50 results)."""
+    """Get all active drivers."""
     try:
         repo = DriversRepository()
         drivers = repo.get_all_active()
         limited = _limit_results(drivers)
         message = f"Found {limited['total']} active drivers."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to fetch drivers", str(e))
@@ -410,7 +411,7 @@ def filter_drivers_by_availability(is_available: bool) -> Dict[str, Any]:
         status = "available" if is_available else "unavailable"
         message = f"Found {limited['total']} {status} drivers."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter drivers", str(e))
@@ -428,7 +429,7 @@ def get_all_stops() -> Dict[str, Any]:
         limited = _limit_results(stops)
         message = f"Found {limited['total']} active stops."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to fetch stops", str(e))
@@ -511,7 +512,7 @@ def search_stops_by_name(query: str) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} stops matching '{query}'."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to search stops", str(e))
@@ -529,7 +530,7 @@ def get_all_routes() -> Dict[str, Any]:
         limited = _limit_results(routes)
         message = f"Found {limited['total']} active routes."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to fetch routes", str(e))
@@ -619,7 +620,7 @@ def filter_routes_by_path(path_id: int) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} routes for path {path_id}."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter routes", str(e))
@@ -634,7 +635,7 @@ def filter_routes_by_status(status: str) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} routes with status '{status}'."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter routes", str(e))
@@ -650,7 +651,7 @@ def filter_routes_by_direction(direction: str) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} routes in direction '{direction}'."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter routes", str(e))
@@ -668,7 +669,7 @@ def get_all_paths() -> Dict[str, Any]:
         limited = _limit_results(paths)
         message = f"Found {limited['total']} active paths."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to fetch paths", str(e))
@@ -760,7 +761,7 @@ def filter_paths_by_stop(stop_id: int) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} paths containing stop {stop_id}."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter paths", str(e))
@@ -813,14 +814,14 @@ def get_available_drivers() -> Dict[str, Any]:
 # ================================================================
 
 def get_all_trips() -> Dict[str, Any]:
-    """Get all active trips (limited to 50 results)."""
+    """Get all active trips."""
     try:
         repo = TripsRepository()
         trips = repo.get_all_active()
         limited = _limit_results(trips)
         message = f"Found {limited['total']} active trips."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to fetch trips", str(e))
@@ -904,7 +905,7 @@ def filter_trips_by_route(route_id: int) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} trips for route {route_id}."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter trips", str(e))
@@ -919,7 +920,7 @@ def filter_trips_by_status(status: str) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} trips with status '{status}'."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter trips", str(e))
@@ -948,7 +949,7 @@ def filter_trips_by_date(trip_date: str) -> Dict[str, Any]:
         limited = _limit_results(filtered)
         message = f"Found {limited['total']} trips on date '{trip_date}'."
         if limited["limited"]:
-            message += " Showing first 50 results. Use filters to narrow down."
+            message += " Large dataset detected; consider applying filters for a more focused list."
         return _success(limited["data"], message)
     except Exception as e:
         return _error("Failed to filter trips", str(e))

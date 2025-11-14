@@ -29,7 +29,7 @@
 
 ### Part 4: Multimodal Features
 - ✅ Backend image processing endpoint (`/api/upload-image`)
-- ✅ Gemini Vision integration in `process_image_node`
+- ✅ OpenAI Vision integration in `process_image_node`
 - ✅ Image extraction logic implemented
 
 ---
@@ -65,16 +65,16 @@
 **Status**: ✅ Updated
 
 **Implementation**: 
-- ✅ README.md updated with `GOOGLE_API_KEY` instructions
-- ✅ Google API key setup instructions added
+- ✅ README.md updated with `OPENAI_API_KEY` instructions
+- ✅ OpenAI API key setup instructions added
 - ✅ Links to get API keys provided
 - ⚠️ `.env.example` file creation blocked (can be manually created)
 
 **What was done**:
 - Updated README.md environment setup section
-- Changed from GROQ_API_KEY to GOOGLE_API_KEY
-- Added instructions for getting Google API key
-- Added links to Supabase and Google API key pages
+- Changed from GROQ_API_KEY to OPENAI_API_KEY
+- Added instructions for getting OpenAI API key
+- Added links to Supabase and OpenAI API key pages
 
 ---
 
@@ -102,7 +102,7 @@
 **What was done**:
 - ✅ Updated to mention "LangGraph Agent integration" instead of Groq
 - ✅ Added image upload feature to frontend description
-- ✅ Updated environment variables section with GOOGLE_API_KEY
+- ✅ Updated environment variables section with OPENAI_API_KEY
 - ✅ Added context-aware responses mention
 - ⚠️ LangGraph architecture section can be added if needed (detailed in PARTS_3_4_IMPLEMENTATION.md)
 
