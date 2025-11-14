@@ -127,7 +127,7 @@ npm install
 npm run dev
 ```
 
-The Vite dev server defaults to `http://localhost:5173` and talks to the backend at `http://localhost:5005/api`.
+The Vite dev server defaults to `http://localhost:5173` and talks to the backend at `http://localhost:5005/api` unless you override the origin by creating `frontend/.env` with `VITE_API_BASE_URL=<backend origin>`.
 
 ### Agent + Vision Flows
 
@@ -140,6 +140,24 @@ The Vite dev server defaults to `http://localhost:5173` and talks to the backend
 - `curl http://localhost:5005/api/stops/` → returns seeded stops
 - `curl -X POST http://localhost:5005/agent -H "Content-Type: application/json" -d "{\"query\":\"List active trips\",\"current_page\":\"busDashboard\"}"` → agent response referencing only dashboard tables
 - `npm run dev` and open the React UI; ensure chat widget hits `/api/chat`
+
+## Deploying on Render.com
+
+1. **Blueprint deploy** – Click “New + → Blueprint” in Render and point it to this repo. The included `render.yaml` defines:
+   - `movi-backend` (Python FastAPI web service) that installs from `requirements.txt` and runs `uvicorn app:app --host 0.0.0.0 --port $PORT`.
+   - `movi-frontend` (static Vite build) that runs `npm install && npm run build` inside `frontend/` and publishes `frontend/dist`.
+
+2. **Environment variables** – Supply all secrets in Render’s dashboard (the blueprint marks them as `sync: false`):
+   - `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_PROJECT_REF`, `SUPABASE_ACCESS_TOKEN`
+   - `SYSTEM_USER_ID` (defaults to `1`), `ANTHROPIC_API_KEY`, optionally `ANTHROPIC_VISION_MODEL`
+
+3. **Frontend API target** – The blueprint wires `VITE_API_BASE_URL` to the backend’s `RENDER_EXTERNAL_URL`. The frontend automatically appends `/api`, so no rewrites or proxies are required.
+
+4. **Supabase bootstrap** – Run `database/schema.sql` + `python database/init_database.py` locally once so Supabase is populated before pointing Render at it.
+
+5. **Post-deploy checks** – After both services are live:
+   - Hit `https://<backend>.onrender.com/api/stops/` (or `/api/health` if you add it) to confirm FastAPI is reachable.
+   - Open the static site’s URL and verify CRUD pages and the chat widget can talk to the backend.
 
 ## MCP Tooling
 

@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: movi-backend
+    env: python
+    plan: starter
+    region: oregon
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    pythonVersion: 3.11
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_PROJECT_REF
+        sync: false
+      - key: SUPABASE_ACCESS_TOKEN
+        sync: false
+      - key: SYSTEM_USER_ID
+        value: "1"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_VISION_MODEL
+        value: claude-3-5-sonnet-latest
+
+  - type: static_site
+    name: movi-frontend
+    plan: starter
+    buildCommand: |
+      cd frontend
+      npm install
+      npm run build
+    publishDir: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: movi-backend
+          envVarKey: RENDER_EXTERNAL_URL
+
