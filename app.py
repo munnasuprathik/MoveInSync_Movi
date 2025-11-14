@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -582,15 +582,46 @@ async def run_agent(
             return response_text, str(response)
 
 
-app = FastAPI(title="MCP Supabase Agent API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+def _build_allowed_origins() -> List[str]:
+    """
+    Compose the CORS allow-list from sensible defaults plus any values
+    supplied through ALLOWED_ORIGINS (comma-separated) or
+    platform-specific env vars like RENDER_EXTERNAL_URL.
+    """
+    defaults = [
         "http://localhost:5173",
         "http://localhost:3000",
         "http://localhost:5000",
-    ],
+        "https://moveinsync-movi.onrender.com",
+    ]
+
+    render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+    if render_external_url:
+        defaults.append(render_external_url.rstrip("/"))
+
+    env_origins = os.getenv("ALLOWED_ORIGINS", "")
+    for origin in env_origins.split(","):
+        cleaned = origin.strip().rstrip("/")
+        if cleaned:
+            defaults.append(cleaned)
+
+    # Preserve order but drop duplicates
+    seen = set()
+    ordered = []
+    for origin in defaults:
+        if origin not in seen:
+            ordered.append(origin)
+            seen.add(origin)
+    return ordered
+
+
+app = FastAPI(title="MCP Supabase Agent API")
+
+allowed_origins = _build_allowed_origins()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
