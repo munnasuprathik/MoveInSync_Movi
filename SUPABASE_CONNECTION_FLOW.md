@@ -6,10 +6,10 @@ Here's the complete data flow from Frontend → Backend → Supabase:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    FRONTEND (React)                          │
-│  - BusDashboard.jsx                                          │
-│  - ManageRoute.jsx                                           │
-│  - Uses: frontend/src/services/api.js                        │
+│                    FRONTEND (React)                         │
+│  - BusDashboard.jsx                                         │
+│  - ManageRoute.jsx                                          │
+│  - Uses: frontend/src/services/api.js                       │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        │ HTTP Requests (Axios)
@@ -17,7 +17,7 @@ Here's the complete data flow from Frontend → Backend → Supabase:
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
 │              BACKEND API (FastAPI)                          │
-│  - backend/main.py                                           │
+│  - backend/main.py                                          │
 │  - backend/routes/*.py (stops, paths, routes, etc.)         │
 │  - Receives HTTP requests                                   │
 └──────────────────────┬──────────────────────────────────────┘
@@ -25,7 +25,7 @@ Here's the complete data flow from Frontend → Backend → Supabase:
                        │ Calls Service Layer
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│              SERVICE LAYER                                   │
+│              SERVICE LAYER                                  │
 │  - backend/services/*_service.py                            │
 │  - Contains business logic                                  │
 │  - Calls Repository Layer                                   │
@@ -34,17 +34,17 @@ Here's the complete data flow from Frontend → Backend → Supabase:
                        │ Calls Repository
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│              REPOSITORY LAYER                                │
+│              REPOSITORY LAYER                               │
 │  - database/repositories.py                                 │
-│  - Uses: database.client.get_client()                        │
+│  - Uses: database.client.get_client()                       │
 │  - All CRUD operations go through here                      │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        │ Uses Supabase Client
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│              DATABASE CLIENT                                 │
-│  - database/client.py                                        │
+│              DATABASE CLIENT                                │
+│  - database/client.py                                       │
 │  - Creates Supabase client: create_client(URL, KEY)         │
 │  - Reads from .env: SUPABASE_URL, SUPABASE_KEY              │
 └──────────────────────┬──────────────────────────────────────┘
@@ -52,11 +52,11 @@ Here's the complete data flow from Frontend → Backend → Supabase:
                        │ Direct Connection
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    SUPABASE                                  │
+│                    SUPABASE                                 │
 │  - PostgreSQL Database (hosted on Supabase)                 │
-│  - All tables: stops, paths, routes, vehicles, drivers,      │
-│    daily_trips, deployments, users                           │
-│  - All data is stored here                                   │
+│  - All tables: stops, paths, routes, vehicles, drivers,     │
+│    daily_trips, deployments, users                          │
+│  - All data is stored here                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
