@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import Any, Optional 
+from typing import Any, List, Optional
 
 
 from dotenv import load_dotenv
@@ -583,19 +583,63 @@ async def run_agent(
             return response_text, str(response)
 
 
-app = FastAPI(title="MCP Supabase Agent API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+def _build_allowed_origins() -> List[str]:
+    """
+    Compose the CORS allow-list from defaults + ALLOWED_ORIGINS env var
+    (comma-separated) and platform-provided URLs such as RENDER_EXTERNAL_URL.
+    """
+    defaults = [
         "http://localhost:5173",
         "http://localhost:3000",
         "http://localhost:5000",
-    ],
+        "https://moveinsync-movi.onrender.com",
+    ]
+
+    render_external = os.getenv("RENDER_EXTERNAL_URL")
+    if render_external:
+        defaults.append(render_external.rstrip("/"))
+
+    env_list = os.getenv("ALLOWED_ORIGINS", "")
+    for origin in env_list.split(","):
+        cleaned = origin.strip().rstrip("/")
+        if cleaned:
+            defaults.append(cleaned)
+
+    seen = set()
+    ordered: List[str] = []
+    for origin in defaults:
+        if origin not in seen:
+            ordered.append(origin)
+            seen.add(origin)
+    return ordered
+
+
+app = FastAPI(title="MCP Supabase Agent API")
+
+allowed_origins = _build_allowed_origins()
+logger.info("Configured CORS origins: %s", allowed_origins)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "service": "MoveInSync Movi backend",
+        "docs": "/docs",
+    }
+
+
+@app.get("/api/health")
+async def api_health():
+    return {"status": "healthy"}
 
 
 @app.post("/agent", response_model=AgentResponse)

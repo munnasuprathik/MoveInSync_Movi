@@ -94,6 +94,7 @@ SUPABASE_ACCESS_TOKEN=...        # Supabase personal access token for MCP
 SYSTEM_USER_ID=1                 # user id for automated deletions
 ANTHROPIC_API_KEY=...
 ANTHROPIC_VISION_MODEL=claude-3-5-sonnet-latest   # optional override
+ALLOWED_ORIGINS=https://move-in-sync-movi.vercel.app   # comma-separated CORS origins
 ```
 
 ### Backend (FastAPI + LangGraph)
@@ -150,6 +151,7 @@ The Vite dev server defaults to `http://localhost:5173` and talks to the backend
 2. **Environment variables** – Supply all secrets in Render’s dashboard (the blueprint marks them as `sync: false`):
    - `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_PROJECT_REF`, `SUPABASE_ACCESS_TOKEN`
    - `SYSTEM_USER_ID` (defaults to `1`), `ANTHROPIC_API_KEY`, optionally `ANTHROPIC_VISION_MODEL`
+   - `ALLOWED_ORIGINS` (comma-separated, e.g. `https://move-in-sync-movi.vercel.app`)
 
 3. **Frontend API target** – The blueprint wires `VITE_API_BASE_URL` to the backend’s `RENDER_EXTERNAL_URL`. The frontend automatically appends `/api`, so no rewrites or proxies are required.
 

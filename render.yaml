@@ -25,6 +25,8 @@ services:
         sync: false
       - key: ANTHROPIC_VISION_MODEL
         value: claude-3-5-sonnet-latest
+      - key: ALLOWED_ORIGINS
+        value: https://move-in-sync-movi.vercel.app
 
   - type: static_site
     name: movi-frontend
