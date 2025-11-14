@@ -618,6 +618,7 @@ def _build_allowed_origins() -> List[str]:
 app = FastAPI(title="MCP Supabase Agent API")
 
 allowed_origins = _build_allowed_origins()
+logger.info("CORS allow_origins: %s", allowed_origins)
 
 app.add_middleware(
     CORSMiddleware,
@@ -626,6 +627,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "service": "MoveInSync Movi backend",
+        "docs": "/docs",
+    }
+
+
+@app.get("/api/health")
+async def api_health():
+    return {"status": "healthy"}
 
 
 @app.post("/agent", response_model=AgentResponse)
