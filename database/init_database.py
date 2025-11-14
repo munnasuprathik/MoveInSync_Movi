@@ -42,7 +42,7 @@ def clear_existing_data():
     for table, pk_column in table_pk_map.items():
         try:
             # Get all active records (not soft deleted)
-            result = supabase.table(table).select(pk_column).is_("deleted_at", "null").execute()
+            result = supabase.table(table).select(pk_column).is_("deleted_at", None).execute()
             if result.data:
                 # Soft delete all active records
                 for record in result.data:
@@ -178,7 +178,7 @@ def populate_paths(user_id=None):
     supabase = get_client()
     
     # Get all stops
-    stops_response = supabase.table("stops").select("stop_id, name").is_("deleted_at", "null").execute()
+    stops_response = supabase.table("stops").select("stop_id, name").is_("deleted_at", None).execute()
     stops = {stop["name"]: stop["stop_id"] for stop in stops_response.data}
     
     # Create realistic Bengaluru paths with professional naming conventions
@@ -323,11 +323,11 @@ def populate_routes(user_id=None):
     supabase = get_client()
     
     # Get paths
-    paths_response = supabase.table("paths").select("path_id, path_name").is_("deleted_at", "null").execute()
+    paths_response = supabase.table("paths").select("path_id, path_name").is_("deleted_at", None).execute()
     paths = {path["path_name"]: path["path_id"] for path in paths_response.data}
     
     # Get stops for start/end points
-    stops_response = supabase.table("stops").select("stop_id, name").is_("deleted_at", "null").execute()
+    stops_response = supabase.table("stops").select("stop_id, name").is_("deleted_at", None).execute()
     stops = {stop["name"]: stop["stop_id"] for stop in stops_response.data}
     
     # Create multiple routes for each path with different times
@@ -515,7 +515,7 @@ def populate_daily_trips(user_id=None):
     supabase = get_client()
     
     # Get routes
-    routes_response = supabase.table("routes").select("route_id, route_display_name").is_("deleted_at", "null").execute()
+    routes_response = supabase.table("routes").select("route_id, route_display_name").is_("deleted_at", None).execute()
     routes = {route["route_display_name"]: route["route_id"] for route in routes_response.data}
     
     # Create trips for today and next 4 days (reduced to 60% - was 7 days)
@@ -578,15 +578,15 @@ def populate_deployments(user_id=None):
     supabase = get_client()
     
     # Get trips
-    trips_response = supabase.table("daily_trips").select("trip_id, display_name").is_("deleted_at", "null").execute()
+    trips_response = supabase.table("daily_trips").select("trip_id, display_name").is_("deleted_at", None).execute()
     trips = {trip["display_name"]: trip["trip_id"] for trip in trips_response.data}
     
     # Get vehicles
-    vehicles_response = supabase.table("vehicles").select("vehicle_id, license_plate").is_("deleted_at", "null").execute()
+    vehicles_response = supabase.table("vehicles").select("vehicle_id, license_plate").is_("deleted_at", None).execute()
     vehicles = {vehicle["license_plate"]: vehicle["vehicle_id"] for vehicle in vehicles_response.data}
     
     # Get drivers
-    drivers_response = supabase.table("drivers").select("driver_id, name").is_("deleted_at", "null").execute()
+    drivers_response = supabase.table("drivers").select("driver_id, name").is_("deleted_at", None).execute()
     drivers = {driver["name"]: driver["driver_id"] for driver in drivers_response.data}
     
     deployments_data = []

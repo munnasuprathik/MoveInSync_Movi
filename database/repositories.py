@@ -19,7 +19,7 @@ class BaseRepository:
     def get_all_active(self) -> List[Dict[str, Any]]:
         """Get all active (non-deleted) records, sorted by created_at descending (newest first)"""
         try:
-            result = self.client.table(self.table_name).select("*").is_("deleted_at", "null").order("created_at", desc=True).execute()
+            result = self.client.table(self.table_name).select("*").is_("deleted_at", None).order("created_at", desc=True).execute()
             if result.data is None:
                 print(f"Warning: {self.table_name}.get_all_active() returned None data")
                 return []
@@ -30,7 +30,7 @@ class BaseRepository:
     
     def get_by_id(self, record_id: int) -> Optional[Dict[str, Any]]:
         """Get a single record by ID (only if not deleted)"""
-        result = self.client.table(self.table_name).select("*").eq("id", record_id).is_("deleted_at", "null").execute()
+        result = self.client.table(self.table_name).select("*").eq("id", record_id).is_("deleted_at", None).execute()
         return result.data[0] if result.data else None
     
     def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -61,7 +61,7 @@ class StopsRepository(BaseRepository):
     
     def get_by_id(self, stop_id: int) -> Optional[Dict[str, Any]]:
         """Get stop by ID"""
-        result = self.client.table(self.table_name).select("*").eq("stop_id", stop_id).is_("deleted_at", "null").execute()
+        result = self.client.table(self.table_name).select("*").eq("stop_id", stop_id).is_("deleted_at", None).execute()
         return result.data[0] if result.data else None
     
     def update(self, stop_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,7 +87,7 @@ class PathsRepository(BaseRepository):
     
     def get_by_id(self, path_id: int) -> Optional[Dict[str, Any]]:
         """Get path by ID"""
-        result = self.client.table(self.table_name).select("*").eq("path_id", path_id).is_("deleted_at", "null").execute()
+        result = self.client.table(self.table_name).select("*").eq("path_id", path_id).is_("deleted_at", None).execute()
         return result.data[0] if result.data else None
     
     def update(self, path_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,7 +113,7 @@ class RoutesRepository(BaseRepository):
     
     def get_by_id(self, route_id: int) -> Optional[Dict[str, Any]]:
         """Get route by ID"""
-        result = self.client.table(self.table_name).select("*").eq("route_id", route_id).is_("deleted_at", "null").execute()
+        result = self.client.table(self.table_name).select("*").eq("route_id", route_id).is_("deleted_at", None).execute()
         return result.data[0] if result.data else None
     
     def update(self, route_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -139,7 +139,7 @@ class VehiclesRepository(BaseRepository):
     
     def get_by_id(self, vehicle_id: int) -> Optional[Dict[str, Any]]:
         """Get vehicle by ID"""
-        result = self.client.table(self.table_name).select("*").eq("vehicle_id", vehicle_id).is_("deleted_at", "null").execute()
+        result = self.client.table(self.table_name).select("*").eq("vehicle_id", vehicle_id).is_("deleted_at", None).execute()
         return result.data[0] if result.data else None
     
     def update(self, vehicle_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -165,7 +165,7 @@ class DriversRepository(BaseRepository):
     
     def get_by_id(self, driver_id: int) -> Optional[Dict[str, Any]]:
         """Get driver by ID"""
-        result = self.client.table(self.table_name).select("*").eq("driver_id", driver_id).is_("deleted_at", "null").execute()
+        result = self.client.table(self.table_name).select("*").eq("driver_id", driver_id).is_("deleted_at", None).execute()
         return result.data[0] if result.data else None
     
     def update(self, driver_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -191,7 +191,7 @@ class TripsRepository(BaseRepository):
     
     def get_by_id(self, trip_id: int) -> Optional[Dict[str, Any]]:
         """Get trip by ID"""
-        result = self.client.table(self.table_name).select("*").eq("trip_id", trip_id).is_("deleted_at", "null").execute()
+        result = self.client.table(self.table_name).select("*").eq("trip_id", trip_id).is_("deleted_at", None).execute()
         return result.data[0] if result.data else None
     
     def update(self, trip_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -217,7 +217,7 @@ class DeploymentsRepository(BaseRepository):
     
     def get_by_id(self, deployment_id: int) -> Optional[Dict[str, Any]]:
         """Get deployment by ID"""
-        result = self.client.table(self.table_name).select("*").eq("deployment_id", deployment_id).is_("deleted_at", "null").execute()
+        result = self.client.table(self.table_name).select("*").eq("deployment_id", deployment_id).is_("deleted_at", None).execute()
         return result.data[0] if result.data else None
     
     def update(self, deployment_id: int, data: Dict[str, Any]) -> Dict[str, Any]:

@@ -7,6 +7,16 @@ function Layout({ children }) {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
+  // Determine current page based on route
+  const getCurrentPage = () => {
+    if (location.pathname.includes('bus-dashboard')) {
+      return 'busDashboard'
+    } else if (location.pathname.includes('manage-route')) {
+      return 'manageRoute'
+    }
+    return 'busDashboard' // default
+  }
+
   return (
     <div className="layout">
       {/* Sidebar */}
@@ -61,7 +71,7 @@ function Layout({ children }) {
       </div>
 
       {/* Chatbot */}
-      <Chatbot />
+      <Chatbot currentPage={getCurrentPage()} />
     </div>
   )
 }

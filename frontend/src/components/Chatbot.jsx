@@ -1,10 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { useLocation } from 'react-router-dom'
-import { mcpAgentAPI } from '../services/api'
+import { agentAPI } from '../services/api'
 import './Chatbot.css'
 
-function Chatbot() {
-  const location = useLocation()
+function Chatbot({ currentPage = 'busDashboard' }) {
+  // Generate a unique session ID for this chat session
+  const [sessionId] = useState(() => {
+    // Get existing session ID from localStorage or create new one
+    const stored = localStorage.getItem('movi_chat_session_id')
+    if (stored) return stored
+    const newId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    localStorage.setItem('movi_chat_session_id', newId)
+    return newId
+  })
+
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState([
     {
@@ -17,19 +25,14 @@ function Chatbot() {
   const [isListening, setIsListening] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speechRecognitionAvailable, setSpeechRecognitionAvailable] = useState(false)
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false)
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [imagePreview, setImagePreview] = useState(null)
   const messagesEndRef = useRef(null)
   const recognitionRef = useRef(null)
   const synthRef = useRef(null)
+  const fileInputRef = useRef(null)
   
-  // Determine current state based on route
-  const getCurrentState = () => {
-    if (location.pathname === '/bus-dashboard') {
-      return 'bus_dashboard'
-    } else if (location.pathname === '/manage-route') {
-      return 'route_management'
-    }
-    return 'route_management' // default
-  }
 
   // Initialize speech recognition and synthesis once on mount
   useEffect(() => {
@@ -118,44 +121,24 @@ function Chatbot() {
     const userMessage = { role: 'user', content: input.trim() }
     const currentInput = input.trim()
     
-    // Build messages array with new user message
-    const updatedMessages = [...messages, userMessage]
-    
     // Add user message to state immediately for UI
-    setMessages(updatedMessages)
+    setMessages(prev => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
 
     try {
-      // Determine current state
-      const currentState = getCurrentState()
-      
-      // Prepare messages for API call - ensure last message is from user
-      const chatMessages = updatedMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }))
-      
-      // Verify last message is from user (should always be true, but check anyway)
-      if (chatMessages.length === 0 || chatMessages[chatMessages.length - 1].role !== 'user') {
-        console.error('Last message is not from user:', chatMessages)
-        setIsLoading(false)
-        return
-      }
-      
-      // Call MCP Agent API (with LangGraph, tools, consequences, vision)
-      const response = await mcpAgentAPI.chat(
-        chatMessages,
-        currentState,
-        null // No image for now, can add image upload later
-      )
+      // Call new agent API with currentPage and sessionId
+      const response = await agentAPI.chat(currentInput, currentPage, sessionId)
 
       const assistantMessage = {
         role: 'assistant',
-        content: response.data.message || 'Sorry, I could not generate a response.'
+        content: response.data.response || 'Sorry, I could not generate a response.'
       }
 
       setMessages(prev => [...prev, assistantMessage])
+      
+      // Update awaiting confirmation status
+      setAwaitingConfirmation(response.data.awaiting_confirmation || false)
     } catch (error) {
       console.error('Chat error:', error)
       const errorMessage = error.response?.data?.detail || error.message || 'Sorry, I encountered an error. Please try again.'
@@ -163,6 +146,7 @@ function Chatbot() {
         role: 'assistant',
         content: errorMessage
       }])
+      setAwaitingConfirmation(false)
     } finally {
       setIsLoading(false)
     }
@@ -256,6 +240,106 @@ function Chatbot() {
     }
   }
 
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'Please select an image file (PNG, JPG, etc.)'
+        }])
+        return
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'Image file is too large. Please select an image smaller than 10MB.'
+        }])
+        return
+      }
+
+      setSelectedImage(file)
+      
+      // Create preview
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setImagePreview(reader.result)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const handleImageUpload = async () => {
+    if (!selectedImage || !input.trim()) {
+      if (!selectedImage) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'Please select an image first.'
+        }])
+      }
+      if (!input.trim()) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'Please provide a message describing what you want to do with the image.'
+        }])
+      }
+      return
+    }
+
+    const userMessage = { 
+      role: 'user', 
+      content: input.trim(),
+      image: imagePreview
+    }
+    
+    // Add user message with image preview to state
+    setMessages(prev => [...prev, userMessage])
+    const currentInput = input.trim()
+    const currentImage = selectedImage
+    
+    // Clear input and image
+    setInput('')
+    setSelectedImage(null)
+    setImagePreview(null)
+    setIsLoading(true)
+
+    try {
+      // Call image upload API
+      const response = await agentAPI.uploadImage(currentImage, currentInput, currentPage, sessionId)
+
+      const assistantMessage = {
+        role: 'assistant',
+        content: response.data.response || 'Image processed successfully!'
+      }
+
+      setMessages(prev => [...prev, assistantMessage])
+      
+      // Update awaiting confirmation status
+      setAwaitingConfirmation(response.data.awaiting_confirmation || false)
+    } catch (error) {
+      console.error('Image upload error:', error)
+      const errorMessage = error.response?.data?.detail || error.message || 'Sorry, I encountered an error processing the image. Please try again.'
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: errorMessage
+      }])
+      setAwaitingConfirmation(false)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleRemoveImage = () => {
+    setSelectedImage(null)
+    setImagePreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
   return (
     <>
       {/* Floating Chat Button */}
@@ -294,6 +378,20 @@ function Chatbot() {
             {messages.map((message, index) => (
               <div key={index} className={`message ${message.role}`}>
                 <div className="message-content">
+                  {message.image && (
+                    <div style={{ marginBottom: '8px', borderRadius: '8px', overflow: 'hidden' }}>
+                      <img 
+                        src={message.image} 
+                        alt="Uploaded" 
+                        style={{ 
+                          maxWidth: '100%', 
+                          maxHeight: '200px', 
+                          objectFit: 'contain',
+                          borderRadius: '8px'
+                        }} 
+                      />
+                    </div>
+                  )}
                   {message.content}
                 </div>
                 {message.role === 'assistant' && (
@@ -328,8 +426,74 @@ function Chatbot() {
             </div>
           )}
 
+          {awaitingConfirmation && (
+            <div className="chatbot-confirmation-indicator" style={{
+              padding: '8px 12px',
+              margin: '8px 16px',
+              backgroundColor: '#fef3c7',
+              border: '1px solid #fbbf24',
+              borderRadius: '8px',
+              fontSize: '14px',
+              color: '#92400e'
+            }}>
+              ⚠️ Waiting for your confirmation. Reply 'yes' to proceed or 'no' to cancel.
+            </div>
+          )}
+
           <div className="chatbot-input-container">
+            {/* Image Preview */}
+            {imagePreview && (
+              <div style={{
+                padding: '8px 12px',
+                margin: '8px 16px',
+                backgroundColor: '#f3f4f6',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <img 
+                  src={imagePreview} 
+                  alt="Preview" 
+                  style={{ 
+                    width: '40px', 
+                    height: '40px', 
+                    objectFit: 'cover',
+                    borderRadius: '4px'
+                  }} 
+                />
+                <span style={{ flex: 1, fontSize: '14px', color: '#374151' }}>
+                  Image selected
+                </span>
+                <button
+                  onClick={handleRemoveImage}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    color: '#ef4444'
+                  }}
+                  title="Remove image"
+                >
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                    <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+            )}
+
             <div className="chatbot-input-wrapper">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageSelect}
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+              />
               <button
                 className={`chatbot-mic-btn ${isListening ? 'listening' : ''} ${!speechRecognitionAvailable ? 'disabled' : ''}`}
                 onClick={handleSpeechToText}
@@ -339,6 +503,29 @@ function Chatbot() {
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                   <path d="M10 1C8.9 1 8 1.9 8 3V9C8 10.1 8.9 11 10 11C11.1 11 12 10.1 12 9V3C12 1.9 11.1 1 10 1Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   <path d="M16 9C16 12.3 13.3 15 10 15M10 15V17M10 17H7M10 17H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <button
+                className="chatbot-image-btn"
+                onClick={() => fileInputRef.current?.click()}
+                title="Upload image"
+                disabled={isLoading}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#6b7280',
+                  transition: 'color 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.color = '#3b82f6'}
+                onMouseLeave={(e) => e.target.style.color = '#6b7280'}
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path d="M4 16L8.586 11.414C9.367 10.633 10.633 10.633 11.414 11.414L16 16M14 14L15.586 12.414C16.367 11.633 17.633 11.633 18.414 12.414L20 14M14 8H14.01M6 20H14C15.1046 20 16 19.1046 16 18V6C16 4.89543 15.1046 4 14 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </button>
               <textarea
@@ -351,14 +538,15 @@ function Chatbot() {
                   e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
                 }}
                 onKeyPress={handleKeyPress}
-                placeholder="Type your message or use voice input..."
+                placeholder={awaitingConfirmation ? "Reply 'yes' to confirm or 'no' to cancel..." : selectedImage ? "Describe what you want to do with this image..." : "Type your message or use voice input..."}
                 rows="1"
                 disabled={isLoading}
               />
               <button
                 className="chatbot-send-btn"
-                onClick={handleSend}
-                disabled={!input.trim() || isLoading}
+                onClick={selectedImage ? handleImageUpload : handleSend}
+                disabled={(!input.trim() && !selectedImage) || isLoading}
+                title={selectedImage ? "Send image with message" : "Send message"}
               >
                 {isLoading ? (
                   <svg className="spinner" width="20" height="20" viewBox="0 0 20 20" fill="none">

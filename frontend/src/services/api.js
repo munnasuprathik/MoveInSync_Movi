@@ -77,7 +77,29 @@ export const deploymentsAPI = {
   delete: (id, deletedBy) => api.delete(`/deployments/${id}`, { params: { deleted_by: deletedBy } }),
 }
 
-// Chatbot API (old simple chatbot)
+// Agent Chat API (LangGraph agent)
+export const agentAPI = {
+  chat: (message, currentPage, sessionId) => 
+    api.post('/chat', {
+      message,
+      current_page: currentPage,
+      session_id: sessionId
+    }),
+  uploadImage: (file, message, currentPage, sessionId) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('message', message)
+    formData.append('current_page', currentPage)
+    formData.append('session_id', sessionId)
+    return api.post('/upload-image', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+  },
+}
+
+// Chatbot API (old simple chatbot - kept for backward compatibility)
 export const chatbotAPI = {
   chat: (messages, temperature = 0.7, maxTokens = 500) => 
     api.post('/chatbot/', {
@@ -87,40 +109,6 @@ export const chatbotAPI = {
     }),
 }
 
-// MCP Agent API (with LangGraph, tools, consequences, vision)
-export const mcpAgentAPI = {
-  chat: (messages, state = 'route_management', imageFile = null) => {
-    if (imageFile) {
-      // Use FormData if image is provided
-      const formData = new FormData()
-      formData.append('messages', JSON.stringify(messages))
-      formData.append('image', imageFile)
-      return api.post(`/mcp/chat?state=${state}`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      })
-    } else {
-      // Use JSON if no image
-      return api.post(`/mcp/chat?state=${state}`, {
-        messages: messages
-      })
-    }
-  },
-  chatStream: (messages, state = 'route_management', imageFile = null) => {
-    const formData = new FormData()
-    formData.append('messages', JSON.stringify(messages))
-    if (imageFile) {
-      formData.append('image', imageFile)
-    }
-    return api.post(`/mcp/chat/stream?state=${state}`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
-      responseType: 'stream'
-    })
-  }
-}
 
 export default api
 

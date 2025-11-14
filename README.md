@@ -37,9 +37,10 @@ pip install -r requirements.txt
    ```
    SUPABASE_URL=your_supabase_url
    SUPABASE_KEY=your_supabase_anon_key
-   GROQ_API_KEY=your_groq_api_key
+   GOOGLE_API_KEY=your_google_api_key
    ```
-   Get your Groq API key from: https://console.groq.com/
+   - Get your Supabase credentials from: https://supabase.com/dashboard
+   - Get your Google API key from: https://makersuite.google.com/app/apikey (for Gemini Vision)
 2. Run `database/schema.sql` in Supabase SQL Editor
 3. (Optional) Run `python database/init_database.py` for sample data
 
@@ -84,10 +85,11 @@ Frontend will be available at:
 - Two main pages: Bus Dashboard & Manage Route
 - API integration with Axios
 - Modern responsive UI
-- AI Chatbot with Groq LLM integration
+- AI Chatbot with LangGraph Agent integration
   - Text-to-speech (Web Speech API)
   - Speech-to-text (Web Speech API)
-  - Direct Groq API integration
+  - Image upload and processing (Gemini Vision)
+  - Context-aware responses based on current page
 
 ## Documentation
 
@@ -271,7 +273,7 @@ Always filter by `deleted_at IS NULL` when querying active records:
 
 ```python
 # Using Supabase client
-active_routes = supabase.table("routes").select("*").is_("deleted_at", "null").execute()
+active_routes = supabase.table("routes").select("*").is_("deleted_at", None).execute()
 
 # Or use the views
 active_routes = supabase.table("active_routes").select("*").execute()

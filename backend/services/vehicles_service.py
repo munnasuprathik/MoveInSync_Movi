@@ -30,7 +30,7 @@ class VehiclesService:
         all_vehicles = self.repository.get_all_active()
         
         # Get all active deployments
-        deployments = client.table("deployments").select("vehicle_id").is_("deleted_at", "null").execute()
+        deployments = client.table("deployments").select("vehicle_id").is_("deleted_at", None).execute()
         assigned_vehicle_ids = {dep.get("vehicle_id") for dep in (deployments.data or [])}
         
         # Filter out assigned vehicles
