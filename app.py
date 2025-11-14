@@ -1,20 +1,28 @@
-import base64
 import json
 import logging
 import os
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 from langchain_anthropic import ChatAnthropic
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.prebuilt import create_react_agent
+from langchain_core.tools import ToolException
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from pydantic import BaseModel
-from langchain_core.messages import HumanMessage
 
+from backend.mcp import (
+    ConsequenceWarning,
+    VisionExtraction,
+    VisionProcessingError,
+    analyze_trip_removal_request,
+    process_dashboard_image,
+)
+from database.repositories import DeploymentsRepository
 from backend.routes import (
     deployments,
     drivers,
@@ -34,6 +42,7 @@ load_dotenv()
 PROJECT_REF = os.environ.get("SUPABASE_PROJECT_REF")
 ACCESS_TOKEN = os.environ.get("SUPABASE_ACCESS_TOKEN")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+SYSTEM_USER_ID = int(os.environ.get("SYSTEM_USER_ID", "1"))
 
 if not PROJECT_REF or not ACCESS_TOKEN:
     raise RuntimeError("SUPABASE_PROJECT_REF and SUPABASE_ACCESS_TOKEN must be set.")
@@ -233,60 +242,178 @@ TABLE_SCHEMAS = {
 
 session_memories: dict[str, dict[str, Any]] = {}
 
+AFFIRM = {"yes", "y", "yeah", "yep", "sure", "ok", "okay", "confirm", "proceed"}
+DECLINE = {"no", "n", "nope", "cancel", "stop", "never", "not now"}
 
-async def describe_image(image_data: str) -> str:
-    if not image_data or CLAUDE_MODEL is None:
-        return ""
 
-    prompt = (
-        "You are analyzing a screenshot of the Movi transport dashboard. "
-        "Identify the current page (busDashboard or manageRoute), the highlighted "
-        "trip/route/vehicle, and summarize any markings (arrows, highlights, notes). "
-        "Respond with a concise paragraph."
+def _normalize(text: str) -> str:
+    return " ".join(text.lower().split()) if text else ""
+
+
+def _classify_confirmation(text: str) -> Optional[str]:
+    normalized = _normalize(text)
+    if not normalized:
+        return None
+    if normalized in AFFIRM:
+        return "yes"
+    if normalized in DECLINE:
+        return "no"
+    return None
+
+
+def _ensure_memory(session_id: str, page: str) -> dict[str, Any]:
+    memory = session_memories.get(session_id)
+    if memory and page and memory.get("current_page") != page:
+        memory = None
+    if not memory:
+        session_memories[session_id] = {
+            "current_page": page,
+            "messages": [],
+            "pending_confirmation": None,
+        }
+        memory = session_memories[session_id]
+    return memory
+
+
+def _save_turn(memory: dict[str, Any], user_text: str, assistant_text: str) -> None:
+    memory.setdefault("messages", []).extend(
+        [
+            {"role": "user", "content": user_text},
+            {"role": "assistant", "content": assistant_text},
+        ]
     )
 
-    try:
-        response = await CLAUDE_MODEL.ainvoke(
-            [
-                HumanMessage(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": prompt,
-                        },
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": image_data,
-                            },
-                        },
-                    ]
-                )
-            ]
+
+def _handle_confirmation(memory: dict[str, Any], user_text: str):
+    pending = memory.get("pending_confirmation")
+    if not pending:
+        return None
+
+    decision = _classify_confirmation(user_text)
+    if decision == "yes":
+        memory["pending_confirmation"] = None
+        return {
+            "action": "proceed",
+            "ack": pending.get("affirm_ack"),
+            "post_action": pending.get("post_action"),
+        }
+    if decision == "no":
+        memory["pending_confirmation"] = None
+        return {"action": "stop", "message": pending.get("cancel_text")}
+
+    return {"action": "reprompt", "message": pending.get("reprompt_text")}
+
+
+def _queue_confirmation(memory: dict[str, Any], warning: ConsequenceWarning) -> str:
+    notice = warning.message
+    post_action: Optional[dict[str, Any]] = None
+    if warning.deployment_id:
+        post_action = {
+            "type": "remove_deployment",
+            "deployment_id": warning.deployment_id,
+            "trip_name": warning.trip_name,
+        }
+    memory["pending_confirmation"] = {
+        "trip": warning.trip_name,
+        "affirm_ack": (
+            f"Confirmed. Proceeding even though '{warning.trip_name}' is "
+            f"{int(warning.booking_percentage)}% booked."
+        ),
+        "cancel_text": (
+            f"No problem — keeping the vehicle assigned to '{warning.trip_name}'."
+        ),
+        "reprompt_text": (
+            f"Please reply with 'yes' to remove the vehicle from '{warning.trip_name}' "
+            "or 'no' to leave it as-is."
+        ),
+        "post_action": post_action,
+    }
+    return notice
+
+
+def _build_augmented_query(
+    user_message: str, vision_result: Optional[VisionExtraction]
+) -> str:
+    if not vision_result:
+        return user_message
+
+    trip = vision_result.trip_name
+    action = (vision_result.detected_action or "").lower()
+    if trip and action in {"remove_vehicle", "delete_deployment", "unassign_vehicle"}:
+        return (
+            f"Remove the vehicle from '{trip}'. "
+            f"(Screenshot context from user: {user_message})"
         )
-        if hasattr(response, "content"):
-            blocks = response.content
-            if isinstance(blocks, list):
-                texts = []
-                for block in blocks:
-                    text = block.get("text") if isinstance(block, dict) else None
-                    if text:
-                        texts.append(text)
-                if texts:
-                    return "\n".join(texts).strip()
-        return extract_final_message(response)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Image description failed: %s", exc)
+    if trip:
+        return f"{user_message}\nScreenshot indicates this concerns trip '{trip}'."
+    return user_message
+
+
+def _vision_preface(vision_result: Optional[VisionExtraction]) -> str:
+    if not vision_result:
         return ""
+    if vision_result.trip_name:
+        confidence_pct = int(vision_result.confidence * 100)
+        return (
+            f"[Vision] Screenshot highlights trip '{vision_result.trip_name}' "
+            f"(confidence {confidence_pct}%)."
+        )
+    return f"[Vision] {vision_result.reasoning}" if vision_result.reasoning else ""
+
+
+def _perform_post_confirmation_action(
+    action_payload: Optional[dict[str, Any]]
+) -> tuple[bool, str]:
+    if not action_payload:
+        return False, "Confirmation acknowledged, but no follow-up action was recorded."
+
+    action_type = action_payload.get("type")
+    if action_type == "remove_deployment":
+        deployment_id = action_payload.get("deployment_id")
+        trip_name = action_payload.get("trip_name") or "this trip"
+        if not deployment_id:
+            return False, "I couldn't find the deployment record to update."
+        try:
+            repo = DeploymentsRepository()
+            repo.soft_delete(int(deployment_id), deleted_by=SYSTEM_USER_ID)
+            return True, f"The vehicle assignment for '{trip_name}' has been removed."
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to soft delete deployment %s: %s", deployment_id, exc)
+            return (
+                False,
+                "I tried to remove the deployment directly, but encountered an unexpected error.",
+            )
+
+    return False, "Confirmation recorded, but I don't know how to finish that action automatically."
+
+
+def _format_tool_exception_message(exc: ToolException) -> str:
+    raw = str(exc).strip()
+    detail = raw
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            message = (
+                payload.get("error", {}).get("message")
+                if isinstance(payload.get("error"), dict)
+                else None
+            )
+            if message:
+                detail = message
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return (
+        "I tried to run that action, but the database rejected the change:\n"
+        f"{detail}\n"
+        "Please fix the data and try again, or let me know if you want to cancel."
+    )
 
 
 class AgentRequest(BaseModel):
     query: str
     current_page: Optional[str] = None
     session_id: Optional[str] = None
-    image_data: Optional[str] = None
 
 
 class AgentResponse(BaseModel):
@@ -298,7 +425,6 @@ class ChatRequest(BaseModel):
     message: str
     current_page: Optional[str] = None
     session_id: Optional[str] = None
-    image_data: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -350,33 +476,45 @@ async def run_agent(
             }
 
             history: list[dict[str, str]] = []
+            memory: Optional[dict[str, Any]] = None
+            confirmation_ack: Optional[str] = None
+
             if session_id:
-                memory = session_memories.get(session_id)
-                if (
-                    memory
-                    and normalized_page
-                    and memory.get("current_page") != normalized_page
-                ):
-                    logger.info(
-                        "Session %s switched page from %s to %s; resetting memory",
-                        session_id,
-                        memory.get("current_page"),
-                        normalized_page,
-                    )
-                    memory = None
-                    session_memories[session_id] = {
-                        "current_page": normalized_page,
-                        "messages": [],
-                    }
-
-                if not memory:
-                    session_memories[session_id] = {
-                        "current_page": normalized_page,
-                        "messages": [],
-                    }
-                    memory = session_memories[session_id]
-
+                memory = _ensure_memory(session_id, normalized_page)
+                memory["current_page"] = normalized_page
                 history = list(memory.get("messages", []))
+
+                confirmation_result = _handle_confirmation(memory, query)
+                if confirmation_result:
+                    if confirmation_result["action"] == "stop":
+                        reply = confirmation_result["message"]
+                        _save_turn(memory, query, reply)
+                        return reply, reply
+                    if confirmation_result["action"] == "reprompt":
+                        reply = confirmation_result["message"]
+                        _save_turn(memory, query, reply)
+                        return reply, reply
+                    if confirmation_result["action"] == "proceed":
+                        post_action = confirmation_result.get("post_action")
+                        confirmation_ack = confirmation_result.get("ack")
+                        if post_action:
+                            success, action_message = _perform_post_confirmation_action(
+                                post_action
+                            )
+                            reply_parts = [
+                                part for part in [confirmation_ack, action_message] if part
+                            ]
+                            reply_text = "\n\n".join(reply_parts) if reply_parts else "Confirmed."
+                            if memory is not None:
+                                _save_turn(memory, query, reply_text)
+                            return reply_text, reply_text
+
+                if confirmation_ack is None:
+                    warning = analyze_trip_removal_request(query)
+                    if warning:
+                        notice = _queue_confirmation(memory, warning)
+                        _save_turn(memory, query, notice)
+                        return notice, notice
 
             logger.info(
                 "Invoking agent with query: %s (page=%s tables=%s history=%s entries)",
@@ -417,23 +555,31 @@ async def run_agent(
                 messages.extend(history)
             messages.append({"role": "user", "content": query})
 
-            response = await agent.ainvoke({"messages": messages})
-            final_message = extract_final_message(response)
-
-            if session_id:
-                memory = session_memories.setdefault(
-                    session_id,
-                    {"current_page": normalized_page, "messages": []},
+            try:
+                response = await agent.ainvoke({"messages": messages})
+                final_message = extract_final_message(response)
+            except ToolException as exc:
+                error_message = _format_tool_exception_message(exc)
+                logger.warning("Tool execution failed: %s", exc)
+                if memory is not None:
+                    _save_turn(memory, query, error_message)
+                return error_message, json.dumps(
+                    {"error": error_message, "tool_exception": str(exc)}
                 )
-                memory["current_page"] = normalized_page
+
+            response_text = str(final_message)
+            if confirmation_ack:
+                response_text = f"{confirmation_ack}\n\n{response_text}"
+
+            if memory is not None:
                 memory["messages"].extend(
                     [
                         {"role": "user", "content": query},
-                        {"role": "assistant", "content": str(final_message)},
+                        {"role": "assistant", "content": response_text},
                     ]
                 )
 
-            return final_message, str(response)
+            return response_text, str(response)
 
 
 app = FastAPI(title="MCP Supabase Agent API")
@@ -483,3 +629,40 @@ app.include_router(vehicles.router, prefix="/api/vehicles", tags=["Vehicles"])
 app.include_router(drivers.router, prefix="/api/drivers", tags=["Drivers"])
 app.include_router(trips.router, prefix="/api/trips", tags=["Trips"])
 app.include_router(deployments.router, prefix="/api/deployments", tags=["Deployments"])
+
+
+@app.post("/api/upload-image", response_model=ChatResponse)
+async def upload_image_endpoint(
+    file: UploadFile = File(...),
+    message: str = Form(...),
+    current_page: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+):
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded image is empty.")
+
+    try:
+        vision_result = await run_in_threadpool(
+            process_dashboard_image, contents, message
+        )
+    except VisionProcessingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    augmented_query = _build_augmented_query(message, vision_result)
+    preface = _vision_preface(vision_result)
+
+    final_message, _ = await run_agent(
+        augmented_query, current_page, session_id
+    )
+
+    if preface:
+        if isinstance(final_message, str):
+            final_message = f"{preface}\n\n{final_message}"
+        else:
+            final_message = f"{preface}\n\n{str(final_message)}"
+
+    return ChatResponse(
+        response=final_message,
+        session_id=session_id,
+    )
