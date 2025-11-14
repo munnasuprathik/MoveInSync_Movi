@@ -3,8 +3,9 @@ import logging
 import os
 import json
 import re
-from typing import Any, Literal, Optional, TypedDict, Annotated
+from typing import Any, Literal, Optional, TypedDict, Annotated, Dict, List
 from datetime import datetime
+import asyncio
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -162,6 +163,32 @@ class LegacyChatResponse(BaseModel):
 
 class LegacyUploadResponse(LegacyChatResponse):
     pass
+
+
+def _normalize_response_value(value: Any) -> str:
+    """
+    Ensure the response we send back to the frontend is always a string.
+    Anthropic can sometimes return structured lists (e.g., [{"type": "text", "text": "..."}]).
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict):
+                if item.get("type") == "text" and "text" in item:
+                    parts.append(item["text"])
+                elif "text" in item:
+                    parts.append(str(item["text"]))
+                elif "content" in item:
+                    parts.append(str(item["content"]))
+                else:
+                    parts.append(str(item))
+            else:
+                parts.append(str(item))
+        normalized = "\n".join(part for part in parts if part).strip()
+        return normalized or str(value)
+    return "" if value is None else str(value)
 
 
 # Global session storage
@@ -471,6 +498,92 @@ Respond ONLY with valid JSON:
             }
         
         return state
+
+    def _extract_text_from_content(self, content: Any) -> str:
+        if isinstance(content, list):
+            tool_results: List[str] = []
+            text_parts: List[str] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type")
+                if block_type == "tool_result":
+                    inner = block.get("content")
+                    if isinstance(inner, list):
+                        tool_results.append(self._extract_text_from_content(inner))
+                    elif inner is not None:
+                        tool_results.append(str(inner))
+                elif block_type == "text":
+                    text_value = block.get("text")
+                    if text_value:
+                        text_parts.append(text_value)
+                elif block_type == "tool_use":
+                    continue
+            if tool_results:
+                merged = "\n".join(part for part in tool_results if part).strip()
+                if merged:
+                    return merged
+            if text_parts:
+                merged = "\n".join(part for part in text_parts if part).strip()
+                if merged:
+                    return merged
+        return str(content)
+
+    def _extract_tool_uses(self, content: Any) -> List[Dict[str, Any]]:
+        tool_calls: List[Dict[str, Any]] = []
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tool_calls.append(block)
+        return tool_calls
+
+    async def _run_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
+        tool = next((t for t in self.mcp_tools if getattr(t, "name", "") == tool_name), None)
+        if not tool:
+            return f"Tool '{tool_name}' not found."
+        try:
+            if hasattr(tool, "ainvoke"):
+                result = await tool.ainvoke(tool_input)
+            elif hasattr(tool, "arun"):
+                result = await tool.arun(tool_input)
+            elif hasattr(tool, "invoke"):
+                result = await asyncio.to_thread(tool.invoke, tool_input)
+            else:
+                result = await asyncio.to_thread(tool.run, tool_input)
+            if isinstance(result, (dict, list)):
+                return json.dumps(result, default=str, ensure_ascii=False)
+            return str(result)
+        except Exception as err:
+            logger.exception("Tool execution error", exc_info=err)
+            return f"Tool '{tool_name}' failed: {err}"
+
+    async def _call_model_with_tools(self, formatted_messages: List[Dict[str, Any]], model) -> Any:
+        conversation: List[Dict[str, Any]] = list(formatted_messages)
+        while True:
+            response = await model.ainvoke(conversation)
+            content = response.content if hasattr(response, "content") else response
+            conversation.append({
+                "role": "assistant",
+                "content": content
+            })
+            tool_calls = self._extract_tool_uses(content)
+            if not tool_calls:
+                return content
+            for tool_call in tool_calls:
+                tool_name = tool_call.get("name")
+                tool_input = tool_call.get("input", {})
+                tool_use_id = tool_call.get("id")
+                tool_result = await self._run_tool(tool_name, tool_input)
+                conversation.append({
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": tool_result
+                        }
+                    ]
+                })
     
     async def process_multimodal_node(self, state: AgentState) -> AgentState:
         """Process image inputs using Claude's vision"""
@@ -835,15 +948,17 @@ Remember to include "WHERE deleted_at IS NULL" for all queries."""
                 elif isinstance(msg, AIMessage):
                     formatted_messages.append({"role": "assistant", "content": msg.content})
                 else:
-                    # Handle dict format
                     formatted_messages.append(msg)
             
             try:
-                response = await model_with_tools.ainvoke(formatted_messages)
-                response_text = response.content if hasattr(response, 'content') else str(response)
+                content = await self._call_model_with_tools(formatted_messages, model_with_tools)
+                response_text = self._extract_text_from_content(content)
+                if not response_text.strip():
+                    response_text = "Query executed successfully."
                 state["messages"] = messages + [AIMessage(content=response_text)]
+            
             except Exception as e:
-                logger.error(f"Final response error: {e}")
+                logger.exception("Final response error:", exc_info=e)
                 error_msg = f"I encountered an error while processing your request: {str(e)}"
                 state["messages"] = messages + [AIMessage(content=error_msg)]
         
@@ -879,14 +994,17 @@ Remember to include "WHERE deleted_at IS NULL" for all queries."""
             # Store state for next turn
             conversation_sessions[conversation_id] = result
             
-            # Extract final response
             final_messages = result.get("messages", [])
             if final_messages:
                 last_message = final_messages[-1]
                 if isinstance(last_message, AIMessage):
-                    final_response = last_message.content
+                    content = last_message.content
+                    extracted = self._extract_text_from_content(content)
+                    final_response = extracted if extracted else "Processing your request..."
                 elif hasattr(last_message, 'content'):
-                    final_response = last_message.content
+                    content = last_message.content
+                    extracted = self._extract_text_from_content(content)
+                    final_response = extracted if extracted else str(content)
                 else:
                     final_response = str(last_message)
             else:
@@ -953,21 +1071,30 @@ async def _run_agent_request(payload: AgentRequest) -> AgentResponse:
                     image_data=payload.image_data
                 )
 
+                normalized_response = _normalize_response_value(result.get("response", ""))
+
                 response = AgentResponse(
-                    response=result["response"],
+                    response=normalized_response,
                     requires_confirmation=result.get("requires_confirmation", False),
                     collected_fields=result.get("collected_fields"),
                     rate_limit_warning=False,
                     conversation_id=result.get("conversation_id")
                 )
+                
                 return response
-
+                
     except ExceptionGroup as eg:
-        logger.error(f"TaskGroup error: {eg}")
+        # Log the REAL inner exception with full stack trace
         actual_error = eg.exceptions[0] if eg.exceptions else eg
-        raise Exception(f"Agent processing error: {str(actual_error)}") from actual_error
+        logger.exception("🔴 TaskGroup error - Inner exception details:", exc_info=actual_error)
+        
+        # Also log all exceptions if there are multiple
+        for idx, exc in enumerate(eg.exceptions):
+            logger.error(f"🔴 TaskGroup sub-exception {idx}: {type(exc).__name__}: {exc}")
+        
+        raise Exception(f"Agent processing error: {str(actual_error)}")
     except Exception as e:
-        logger.error(f"Agent request error: {e}")
+        logger.exception(f"🔴 Agent request error:", exc_info=e)
         raise
 
 
